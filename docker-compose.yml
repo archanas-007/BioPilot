@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # 1. Main Application API (FastAPI)
+  backend:
+    build: ./backend
+    container_name: biopilot-backend
+    command: /bin/sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+      - qdrant
+
+  # 2. Asynchronous Worker (Celery/FastAPI logic)
+  worker:
+    build: ./backend
+    container_name: biopilot-worker
+    command: celery -A app.core.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/app
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+
+  # 3. Database (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    container_name: biopilot-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 4. Task Queue Broker (Redis)
+  redis:
+    image: redis:7-alpine
+    container_name: biopilot-redis
+    ports:
+      - "6379:6379"
+
+  # 5. Object Storage (MinIO - S3 Compatible)
+  minio:
+    image: minio/minio
+    container_name: biopilot-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "9000:9000" # API
+      - "9001:9001" # Console UI
+    volumes:
+      - minio_data:/data
+
+  # 6. Vector Database (Qdrant for RAG)
+  qdrant:
+    image: qdrant/qdrant
+    container_name: biopilot-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+  
+  frontend:
+    build: ./frontend
+    container_name: biopilot-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+  
+volumes:
+  postgres_data:
+  minio_data:
+  qdrant_data:
